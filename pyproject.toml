@@ -1,0 +1,27 @@
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[project]
+authors = [
+    {name = "Nicolas Tessore", email = "n.tessore@ucl.ac.uk"}
+]
+dependencies = [
+    "fitsio",
+    "polars",
+]
+description = "FITS file reader for Polars"
+dynamic = ["version"]
+license = "MIT"
+maintainers = [
+    {name = "Nicolas Tessore", email = "n.tessore@ucl.ac.uk"}
+]
+name = "polars-fits"
+readme = "README.md"
+requires-python = ">=3.10"
+
+[project.urls]
+repository = "https://github.com/ntessore/polars-fits"
+
+[tool.hatch]
+version.source = "vcs"
