@@ -30,13 +30,9 @@ def get_hdu(
     fits: fitsio.FITS,
     ext: str | int | None = None,
 ) -> fitsio.hdu.ImageHDU | fitsio.hdu.TableHDU | fitsio.hdu.AsciiTableHDU:
-    """Return HDU from *ext* or first extension with data."""
+    """Return HDU from *ext*."""
     if ext is None:
-        for ext in range(len(fits)):
-            if fits[ext].has_data():
-                break
-        else:
-            raise IOError("No extensions have data")
+        ext = min(len(fits), 1)
     return fits[ext]
 
 
