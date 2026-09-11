@@ -8,6 +8,7 @@ authors = [
 ]
 dependencies = [
     "fitsio",
+    "parse",
     "polars",
 ]
 description = "FITS file reader for Polars"

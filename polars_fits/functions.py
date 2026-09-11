@@ -1,12 +1,43 @@
 import glob
 
 from collections.abc import Iterator
+from typing import Any
 from warnings import warn
 
 import polars as pl
-from fitsio import FITS
+import fitsio
+import parse
 
 from polars_fits.filter import CfitsioFilter
+
+
+class PathDataParser:
+    """Parser for extra data from paths."""
+
+    def __init__(self, pattern: str) -> None:
+        """Create a new parser with the given pattern."""
+        self.parser = parse.compile(pattern)
+
+    def __call__(self, path: str) -> dict[str, Any]:
+        """Extract data from path."""
+        result = self.parser.parse(path)
+        if result is None:
+            raise ValueError(f"path does not match pattern: {path}")
+        return result.named
+
+
+def get_hdu(
+    fits: fitsio.FITS,
+    ext: str | int | None = None,
+) -> fitsio.hdu.ImageHDU | fitsio.hdu.TableHDU | fitsio.hdu.AsciiTableHDU:
+    """Return HDU from *ext* or first extension with data."""
+    if ext is None:
+        for ext in range(len(fits)):
+            if fits[ext].has_data():
+                break
+        else:
+            raise IOError("No extensions have data")
+    return fits[ext]
 
 
 def scan_fits(
@@ -15,6 +46,7 @@ def scan_fits(
     ext: int | str | None = None,
     columns: list[str] | None = None,
     row_filtering: bool = False,
+    pattern: str | None = None,
 ) -> pl.LazyFrame:
     """
     Read FITS files.
@@ -25,21 +57,20 @@ def scan_fits(
 
     if isinstance(paths, str):
         paths = [paths]
-    files = sum((glob.glob(path) for path in paths), [])
+    paths = sum((glob.glob(path) for path in paths), [])
 
-    if not files:
+    if not paths:
         raise FileNotFoundError(str(path))
 
-    with FITS(files[0]) as fits:
-        if ext is None:
-            for i in range(len(fits)):
-                if fits[i].has_data():
-                    ext = i
-                    break
-            else:
-                raise IOError("No extensions have data")
+    path_parser = PathDataParser(pattern) if pattern is not None else None
 
-        schema = pl.from_numpy(fits[ext].read(columns=columns, rows=[])).schema
+    def schema() -> pl.Schema:
+        """Produce schema of FITS files."""
+        with fitsio.FITS(path := paths[0]) as fits:
+            df = pl.from_numpy(get_hdu(fits, ext).read(columns=columns, rows=[]))
+        if path_parser is not None:
+            df = df.with_columns_seq(**path_parser(path))
+        return df.schema
 
     def source_generator(
         with_columns: list[str] | None,
@@ -65,12 +96,19 @@ def scan_fits(
                 # all filtering can be done at FITS level
                 predicate = None
 
-        for file in files:
+        for path in paths:
             if n_rows is not None and n_rows < 1:
                 break
 
-            with FITS(file) as fits:
-                hdu = fits[ext]
+            path_columns = path_parser(path) if path_parser is not None else None
+
+            if with_columns is not None and path_columns is not None:
+                fits_columns = [col for col in with_columns if col not in path_columns]
+            else:
+                fits_columns = with_columns
+
+            with fitsio.FITS(path) as fits:
+                hdu = get_hdu(fits, ext)
 
                 file_n_rows = hdu.get_nrows()
                 if n_rows is not None:
@@ -90,8 +128,11 @@ def scan_fits(
                         continue
 
                     df = pl.from_numpy(
-                        hdu.read(ext=ext, columns=with_columns, rows=rows)
+                        hdu.read(ext=ext, columns=fits_columns, rows=rows)
                     )
+
+                    if path_columns is not None:
+                        df = df.with_columns_seq(**path_columns)
 
                     if predicate is not None:
                         df = df.filter(predicate)
@@ -105,4 +146,5 @@ def scan_fits(
         io_source=source_generator,
         schema=schema,
         validate_schema=True,
+        is_pure=True,
     )
